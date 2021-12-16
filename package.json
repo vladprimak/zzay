@@ -9,6 +9,6 @@
     "firebase": "^7.21.1",
     "fstorm": "latest",
     "jimp": "latest",
-    "node.js": "latest"
+    "node": "latest"
   }
 }
