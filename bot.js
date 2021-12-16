@@ -1,19 +1,25 @@
+const express = require("express");
+const app = express();
+app.listen(8080);
+app.get("/", (req, res) => {
+  res.send(" ");
+});
 /******************************************************
  * Discord Bot Maker Bot
- * Version 2.0.8
+ * Version 2.0.2
  * Robert Borghese
  ******************************************************/
 
 const DBM = {};
-DBM.version = "2.0.8";
+DBM.version = "2.0.3";
 
 const DiscordJS = (DBM.DiscordJS = require("discord.js"));
 
-if (DiscordJS.version < "13.3.0") {
+if (DiscordJS.version < "13.2.0") {
   console.log(
-    'This version of Discord Bot Maker requires discord.js v13.3.0+.\nPlease use "Project > Module Manager" and "Project > Reinstall Node Modules" to update to discord.js v13.3.\n',
+    'This version of Discord Bot Maker requires discord.JS v13.2.0.\nPlease use "Project > Module Manager" and "Project > Reinstall Node Modules" to update to discord.js v13.\n',
   );
-  throw new Error("Need discord.js v13.3 to run!!!");
+  throw new Error("Need discord.js v13 to run!!!");
 }
 
 const noop = () => void 0;
@@ -39,11 +45,6 @@ const MsgType = {
   DUPLICATE_SELECT_ID: 11,
 
   MISSING_APPLICATION_COMMAND_ACCESS: 100,
-  MISSING_MUSIC_MODULES: 101,
-
-  MUTABLE_VOLUME_DISABLED: 200,
-  ERROR_GETTING_YT_INFO: 201,
-  ERROR_CREATING_AUDIO: 202,
 };
 
 function PrintError(type) {
@@ -148,32 +149,12 @@ function PrintError(type) {
           arguments[2],
         ),
       );
-      break;
-    }
-
-    case MsgType.MISSING_MUSIC_MODULES: {
-      warn(format('Could not load audio-related Node modules.\nPlease run "File -> Music Capabilities -> Update Music Libraries" to ensure they are installed.'));
-      break;
-    }
-
-
-    case MsgType.MUTABLE_VOLUME_DISABLED: {
-      warn(format('Tried setting volume but "Mutable Volume" is disabled.'));
-      break;
-    }
-
-    case MsgType.ERROR_GETTING_YT_INFO: {
-      warn(format('Error getting YouTube info.\n%s', arguments[1]));
-    }
-
-    case MsgType.ERROR_CREATING_AUDIO: {
-      warn(format('Error creating audio resource.\n%s', arguments[1]));
     }
   }
 }
 
-function GetActionErrorText(location, index, dataName) {
-  return "Error with the " + location + (dataName ? ` - Action #${index} (${dataName})` : "");
+function GetActionErrorText(type, name, index) {
+  return require("node:util").format('Error with the %s "%s", Action #%d', type, name, index);
 }
 
 //#endregion
@@ -473,15 +454,11 @@ Bot.reformatEvents = function () {
 
 Bot.prepareActions = function (actions) {
   if (actions) {
-    const customData = {};
     for (let i = 0; i < actions.length; i++) {
       const action = actions[i];
       if (action?.name && Actions.modInitReferences[action.name]) {
-        Actions.modInitReferences[action.name].call(this, action, customData, i);
+        Actions.modInitReferences[action.name].call(this, action);
       }
-    }
-    if (Object.keys(customData).length > 0) {
-      actions._customData = customData;
     }
   }
 };
@@ -514,7 +491,7 @@ Bot.initEvents = function () {
 };
 
 Bot.login = function () {
-  this.bot.login(Files.data.settings.token);
+  this.bot.login(process.env.TOKEN);
 };
 
 Bot.onReady = function () {
@@ -568,29 +545,21 @@ Bot.registerApplicationCommands = function () {
   }
 };
 
-Bot.shouldPrintAnyMissingAccessError = function () {
-  return !(Files.data.settings.ignoreCommandScopeErrors ?? false);
-};
-
-Bot.clearUnspecifiedServerCommands = function () {
-  return Files.data.settings.clearUnlistedServers ?? false;
-};
-
 Bot.setGlobalCommands = function (commands) {
-  this.bot.application?.commands?.set?.(commands).then(function() {}).catch(function(err) {
-    console.error(err);
+  this.bot.application?.commands?.set?.(commands).then(function() {}).catch(function(e) {
+    console.error(e);
   })
 };
 
 Bot.setCommandsForServer = function(guild, commands, printMissingAccessError) {
   if(guild?.commands?.set) {
-    guild.commands.set(commands).then(function() {}).catch((err) => {
-      if (err.code === 50001) {
-        if (this.shouldPrintAnyMissingAccessError() && printMissingAccessError) {
+    guild.commands.set(commands).then(function() {}).catch(function(e) {
+      if (e.code === 50001) {
+        if (printMissingAccessError) {
           PrintError(MsgType.MISSING_APPLICATION_COMMAND_ACCESS, guild.name, guild.id);
         }
       } else {
-        console.error(err);
+        console.error(e);
       }
     });
   }
@@ -603,39 +572,22 @@ Bot.setAllServerCommands = function (commands, printMissingAccessError = true) {
       .then((guild) => {
         this.setCommandsForServer(guild, commands, printMissingAccessError);
       })
-      .catch(function (err) {
-        console.error(err);
+      .catch(function (e) {
+        console.error(e);
       });
   });
 };
 
 Bot.setCertainServerCommands = function (commands, serverIdList) {
-  if (this.clearUnspecifiedServerCommands()) {
-    this.bot.guilds.cache.forEach((key, value) => {
-      this.bot.guilds
-        .fetch(key)
-        .then((guild) => {
-          if (serverIdList.includes(guild.id)) {
-            this.setCommandsForServer(guild, commands, true);
-          } else {
-            this.setCommandsForServer(guild, [], true);
-          }
-        })
-        .catch(function (err) {
-          console.error(err);
-        });
-    });
-  } else {
-    for (let i = 0; i < serverIdList.length; i++) {
-      this.bot.guilds
-        .fetch(serverIdList[i])
-        .then((guild) => {
-          this.setCommandsForServer(guild, commands, true);
-        })
-        .catch(function (err) {
-          PrintError(MsgType.INVALID_SLASH_COMMAND_SERVER_ID, serverIdList[i]);
-        });
-    }
+  for (let i = 0; i < serverIdList.length; i++) {
+    this.bot.guilds
+      .fetch(serverIdList[i])
+      .then((guild) => {
+        this.setCommandsForServer(guild, commands, true);
+      })
+      .catch(function (e) {
+        PrintError(MsgType.INVALID_SLASH_COMMAND_SERVER_ID, serverIdList[i]);
+      });
   }
 };
 
@@ -643,9 +595,6 @@ Bot.preformInitialization = function () {
   const bot = this.bot;
   if (this.$evts["1"]) {
     Events.onInitialization(bot);
-  }
-  if (this.$evts["48"]) {
-    Events.onInitializationOnce(bot);
   }
   if (this.$evts["3"]) {
     Events.setupIntervals(bot);
@@ -796,7 +745,7 @@ Bot.onInteraction = function (interaction) {
 Bot.onSlashCommandInteraction = function (interaction) {
   const interactionName = interaction.commandName;
   if (this.$slash[interactionName]) {
-    Actions.preformActionsFromInteraction(interaction, this.$slash[interactionName], true);
+    Actions.preformActionsFromInteraction(interaction, this.$slash[interactionName]);
   }
 };
 
@@ -806,14 +755,14 @@ Bot.onContextMenuInteraction = function (interaction) {
     if (interaction.guild) {
       interaction.guild.members.fetch(interaction.targetId).then((member) => {
         interaction._targetMember = member;
-        Actions.preformActionsFromInteraction(interaction, this.$user[interactionName], true);
+        Actions.preformActionsFromInteraction(interaction, this.$user[interactionName]);
       }).catch(console.error);
     }
   } else if (this.$msge[interactionName]) {
     if (interaction.channel) {
       interaction.channel.messages.fetch(interaction.targetId).then((message) => {
         interaction._targetMessage = message;
-        Actions.preformActionsFromInteraction(interaction, this.$msge[interactionName], true);
+        Actions.preformActionsFromInteraction(interaction, this.$msge[interactionName]);
       }).catch(console.error);
     }
   }
@@ -870,7 +819,6 @@ const ActionsCache = (Actions.ActionsCache = class ActionsCache {
     this.msg = options.msg ?? null;
     this.interaction = options.interaction ?? null;
     this.isSubCache = options.isSubCache ?? false;
-    this.meta = options.meta ?? { isEvent: false, name: "" };
   }
 
   onCompleted() {
@@ -887,11 +835,9 @@ const ActionsCache = (Actions.ActionsCache = class ActionsCache {
           content: Actions.getDefaultResponseText(),
         };
         if (this.interaction.deferred) {
-          this.interaction.editReply(replyData)
-            .catch((err) => Actions.displayError(null, this, err));
+          this.interaction.editReply(replyData);
         } else {
-          this.interaction.reply(replyData)
-            .catch((err) => Actions.displayError(null, this, err));
+          this.interaction.reply(replyData);
         }
       }
     }
@@ -901,45 +847,12 @@ const ActionsCache = (Actions.ActionsCache = class ActionsCache {
     return this.interaction?.user ?? this.msg?.author;
   }
 
-  getMessage() {
-    const { msg, interaction } = this;
-    if (msg) {
-      return msg;
-    } else if (interaction) {
-      if (interaction.message) {
-        return interaction.message;
-      } else if (interaction._targetMessage) {
-        return interaction._targetMessage;
-      }
-    }
-    return null;
-  }
-
-  goToAnchor(anchorName) {
-    const index = this.actions?._customData?.anchors?.[anchorName];
-    if (typeof index === "number" && this.actions[index]) {
-      this.index = index - 1;
-      Actions.callNextAction(this);
-    }
-  }
-
-  toString() {
-    let result = `${this.meta.isEvent ? "Event" : "Command"} "${this.meta.name}"`;
-    if (this.interaction?.isButton()) {
-      result += ", Button" + (this.interaction._button ? ` "${this.interaction._button.label}"` : "");
-    } else if (this.interaction?.isSelectMenu()) {
-      result += ", Select Menu" + (this.interaction._select ? ` "${this.interaction._select.placeholder}"` : "");
-    }
-    return result;
-  }
-
   static extend(other, actions) {
     return new ActionsCache(actions, other.server, {
       isSubCache: true,
       temp: other.temp,
       msg: other.msg,
       interaction: other.interaction,
-      meta: other.meta,
     });
   }
 });
@@ -1004,33 +917,6 @@ Actions.getSlashParameter = function (interaction, name, defaultValue) {
   return defaultValue !== undefined ? defaultValue : result;
 };
 
-Actions._letterEmojis = "🇦 🇧 🇨 🇩 🇪 🇫 🇬 🇭 🇮 🇯 🇰 🇱 🇲 🇳 🇴 🇵 🇶 🇷 🇸 🇹 🇺 🇻 🇼 🇽 🇾 🇿".split(" ");
-
-Actions.convertTextToEmojis = function (text, useRegional = true) {
-  let result = "";
-  for (let i = 0; i < text.length; i++) {
-    const code = text.toUpperCase().charCodeAt(i) - 65;
-    if (code >= 0 && code <= 26) {
-      result += useRegional ? (":regional_indicator_" + text[i].toLowerCase() + ":") : ("\\" + this._letterEmojis[code]);
-    } else {
-      result += text[i];
-    }
-  }
-  return result;
-};
-
-Actions.getFlagEmoji = function (flagName) {
-  if (flagName.startsWith("flag_")) {
-    flagName = flagName.substring(5);
-  }
-  flagName = flagName.toUpperCase();
-  return this._letterEmojis[flagName.charCodeAt(0) - 65] + this._letterEmojis[flagName.charCodeAt(1) - 65];
-};
-
-Actions.getCustomEmoji = function (nameOrId) {
-  return Bot.bot.emojis.cache.get(nameOrId) ?? Bot.bot.emojis.cache.find((e) => e.name === nameOrId);
-};
-
 Actions.eval = function (content, cache, logError = true) {
   if (!content) return false;
   const DBM = this.getDBM();
@@ -1041,7 +927,6 @@ Actions.eval = function (content, cache, logError = true) {
   }
   const globalVars = this.getActionVariable.bind(this.global);
   const slashParams = this.getSlashParameter.bind(this, cache.interaction);
-  const customEmoji = this.getCustomEmoji.bind(this);
   const msg = cache.msg;
   const interaction = cache.interaction;
   const button = interaction?._button ?? "";
@@ -1139,17 +1024,17 @@ Actions.modDirectories = function () {
 
 Actions.preformActionsFromMessage = function (msg, cmd) {
   if (this.checkConditions(msg.guild, msg.member, msg.author, cmd) && this.checkTimeRestriction(msg.author, cmd)) {
-    this.invokeActions(msg, cmd.actions, cmd);
+    this.invokeActions(msg, cmd.actions);
   }
 };
 
-Actions.preformActionsFromInteraction = function (interaction, cmd, meta = null, initialTempVars = null) {
+Actions.preformActionsFromInteraction = function (interaction, cmd, initialTempVars = null) {
   const invalidPermissions = this.getInvalidPermissionsResponse();
   const invalidCooldown = this.getInvalidCooldownResponse();
   if (this.checkConditions(interaction.guild, interaction.member, interaction.user, cmd)) {
     const timeRestriction = this.checkTimeRestriction(interaction.user, cmd, true);
     if (timeRestriction === true) {
-      this.invokeInteraction(interaction, cmd.actions, initialTempVars, meta === true ? cmd : meta);
+      this.invokeInteraction(interaction, cmd.actions, initialTempVars);
     } else if (invalidCooldown) {
       const { format } = require("node:util");
       const content = typeof timeRestriction === "string" ? format(invalidCooldown, timeRestriction) : invalidCooldown;
@@ -1160,13 +1045,13 @@ Actions.preformActionsFromInteraction = function (interaction, cmd, meta = null,
   }
 };
 
-Actions.preformActionsFromSelectInteraction = function (interaction, select, meta = null, initialTempVars = null) {
+Actions.preformActionsFromSelectInteraction = function (interaction, select, initialTempVars = null) {
   const tempVars = initialTempVars ?? {};
   if (typeof select.tempVarName === "string") {
     const values = interaction.values;
     tempVars[select.tempVarName] = !values || values.length === 0 ? 0 : values.length === 1 ? values[0] : values;
   }
-  this.preformActionsFromInteraction(interaction, select, meta, tempVars);
+  this.preformActionsFromInteraction(interaction, select, tempVars);
 };
 
 Actions.checkConditions = function (guild, member, user, cmd) {
@@ -1264,43 +1149,23 @@ Actions.checkPermissions = function (member, permissions) {
   return member.permissions.has(permissions);
 };
 
-Actions.invokeActions = function (msg, actions, cmd = null) {
+Actions.invokeActions = function (msg, actions) {
   if (actions.length > 0) {
-    this.callNextAction(new ActionsCache(actions, msg.guild, {
-      msg,
-      meta: {
-        name: cmd?.name,
-        isEvent: false
-      }
-    }));
+    this.callNextAction(new ActionsCache(actions, msg.guild, { msg }));
   }
 };
 
-Actions.invokeInteraction = function (interaction, actions, initialTempVars, meta = null) {
-  const cacheData = {
-    interaction,
-    temp: (initialTempVars || {}),
-  };
-  if (meta) {
-    cacheData.meta = {
-      name: meta?.name,
-      isEvent: false,
-    };
+Actions.invokeInteraction = function (interaction, actions, initialTempVars) {
+  if (actions.length > 0) {
+    const cache = new ActionsCache(actions, interaction.guild, { interaction, temp: (initialTempVars || {}) });
+    this.callNextAction(cache);
   }
-  const cache = new ActionsCache(actions, interaction.guild, cacheData);
-  this.callNextAction(cache);
 };
 
 Actions.invokeEvent = function (event, server, temp) {
   const actions = event.actions;
   if (actions.length > 0) {
-    const cache = new ActionsCache(actions, server, {
-      temp: { ...temp },
-      meta: {
-        name: event.name,
-        isEvent: true
-      }
-    });
+    const cache = new ActionsCache(actions, server, { temp: { ...temp } });
     this.callNextAction(cache);
   }
 };
@@ -1356,8 +1221,8 @@ Actions.getInvalidCooldownResponse = function () {
 };
 
 Actions.getErrorString = function (data, cache) {
-  const location = cache.toString();
-  return GetActionErrorText(location, cache.index + 1, data?.name);
+  const type = "permissions" in data || "restriction" in data || !("event-type" in data) ? "command" : "event";
+  return GetActionErrorText(type, data.name, cache.index + 1);
 };
 
 Actions.displayError = function (data, cache, err) {
@@ -1455,53 +1320,29 @@ Actions.getSendTarget = function (type, varName, cache) {
         return server.getDefaultChannel();
       }
       break;
-    case 9:
-      if (interaction?._targetMember) {
-        return interaction._targetMember;
-      }
-      break;
-    case 10:
-      if (server) {
-        return server.publicUpdatesChannel;
-      }
-      break;
-    case 11:
-      if (server) {
-        return server.rulesChannel;
-      }
-      break;
-    case 12:
-      if (server) {
-        return server.systemChannel;
-      }
-      break;
     case 100: {
-      const searchValue = this.evalMessage(varName, cache);
-      const result = Bot.bot.users.cache.find((user) => user.username === searchValue);
+      const result = Bot.bot.users.cache.find((user) => user.username === varName);
       if (result) {
         return result;
       }
       break;
     }
     case 101: {
-      const searchValue = this.evalMessage(varName, cache);
-      const result = Bot.bot.users.cache.get(searchValue);
+      const result = Bot.bot.users.cache.get(varName);
       if (result) {
         return result;
       }
       break;
     }
     case 102: {
-      const searchValue = this.evalMessage(varName, cache);
-      const result = Bot.bot.channels.cache.find((channel) => channel.name === searchValue);
+      const result = Bot.bot.channels.cache.find((channel) => channel.name === varName);
       if (result) {
         return result;
       }
       break;
     }
     case 103: {
-      const searchValue = this.evalMessage(varName, cache);
-      const result = Bot.bot.channels.cache.get(searchValue);
+      const result = Bot.bot.channels.cache.get(varName);
       if (result) {
         return result;
       }
@@ -1509,20 +1350,6 @@ Actions.getSendTarget = function (type, varName, cache) {
     }
     default:
       return this.getTargetFromVariableOrParameter(type - 5, varName, cache);
-  }
-};
-
-Actions.getSendReplyTarget = function (type, varName, cache) {
-  const { interaction, msg, server } = cache;
-  switch (type) {
-    case 13:
-      const msg = cache.getMessage();
-      if (msg) {
-        return msg;
-      }
-      break;
-    default:
-      return this.getSendTarget(type, varName, cache);
   }
 };
 
@@ -1549,16 +1376,14 @@ Actions.getMember = function (type, varName, cache) {
       }
       break;
     case 100: {
-      const searchValue = this.evalMessage(varName, cache);
-      const result = Bot.bot.users.cache.find((user) => user.username === searchValue);
+      const result = Bot.bot.users.cache.find((user) => user.username === varName);
       if (result) {
         return result;
       }
       break;
     }
     case 101: {
-      const searchValue = this.evalMessage(varName, cache);
-      const result = Bot.bot.users.cache.get(searchValue);
+      const result = Bot.bot.users.cache.get(varName);
       if (result) {
         return result;
       }
@@ -1570,11 +1395,17 @@ Actions.getMember = function (type, varName, cache) {
 };
 
 Actions.getMessage = function (type, varName, cache) {
+  const { interaction, msg } = cache;
   switch (type) {
     case 0:
-      const msg = cache.getMessage();
       if (msg) {
         return msg;
+      } else if (interaction) {
+        if (interaction.message) {
+          return interaction.message;
+        } else if (interaction._targetMessage) {
+          return interaction._targetMessage;
+        }
       }
       break;
     default:
@@ -1590,22 +1421,6 @@ Actions.getServer = function (type, varName, cache) {
         return server;
       }
       break;
-    case 100: {
-      const searchValue = this.evalMessage(varName, cache);
-      const result = Bot.bot.guilds.cache.find((guild) => guild.name === searchValue);
-      if (result) {
-        return result;
-      }
-      break;
-    }
-    case 101: {
-      const searchValue = this.evalMessage(varName, cache);
-      const result = Bot.bot.guilds.cache.get(searchValue);
-      if (result) {
-        return result;
-      }
-      break;
-    }
     default:
       return this.getTargetFromVariableOrParameter(type - 1, varName, cache);
   }
@@ -1636,8 +1451,7 @@ Actions.getRole = function (type, varName, cache) {
     }
     case 100: {
       if (server) {
-        const searchValue = this.evalMessage(varName, cache);
-        const result = server.roles.cache.find((role) => role.name === searchValue);
+        const result = server.roles.cache.find((role) => role.name === varName);
         if (result) {
           return result;
         }
@@ -1646,8 +1460,7 @@ Actions.getRole = function (type, varName, cache) {
     }
     case 101: {
       if (server) {
-        const searchValue = this.evalMessage(varName, cache);
-        const result = server.roles.cache.get(searchValue);
+        const result = server.roles.cache.get(varName);
         if (result) {
           return result;
         }
@@ -1681,32 +1494,15 @@ Actions.getChannel = function (type, varName, cache) {
         return server.getDefaultChannel();
       }
       break;
-    case 7:
-      if (server) {
-        return server.publicUpdatesChannel;
-      }
-      break;
-    case 8:
-      if (server) {
-        return server.rulesChannel;
-      }
-      break;
-    case 9:
-      if (server) {
-        return server.systemChannel;
-      }
-      break;
     case 100: {
-      const searchValue = this.evalMessage(varName, cache);
-      const result = Bot.bot.channels.cache.find((channel) => channel.name === searchValue);
+      const result = Bot.bot.channels.cache.find((channel) => channel.name === varName);
       if (result) {
         return result;
       }
       break;
     }
     case 101: {
-      const searchValue = this.evalMessage(varName, cache);
-      const result = Bot.bot.channels.cache.get(searchValue);
+      const result = Bot.bot.channels.cache.get(varName);
       if (result) {
         return result;
       }
@@ -1742,22 +1538,15 @@ Actions.getVoiceChannel = function (type, varName, cache) {
         return server.getDefaultVoiceChannel();
       }
       break;
-    case 7:
-      if (server) {
-        return server.afkChannel;
-      }
-      break;
     case 100: {
-      const searchValue = this.evalMessage(varName, cache);
-      const result = Bot.bot.channels.cache.find((channel) => channel.name === searchValue);
+      const result = Bot.bot.channels.cache.find((channel) => channel.name === varName);
       if (result) {
         return result;
       }
       break;
     }
     case 101: {
-      const searchValue = this.evalMessage(varName, cache);
-      const result = Bot.bot.channels.cache.get(searchValue);
+      const result = Bot.bot.channels.cache.get(varName);
       if (result) {
         return result;
       }
@@ -1765,16 +1554,6 @@ Actions.getVoiceChannel = function (type, varName, cache) {
     }
     default:
       return this.getTargetFromVariableOrParameter(type - 3, varName, cache);
-  }
-};
-
-Actions.getAnyChannel = function (type, varName, cache) {
-  switch (type) {
-    case 10: return this.getVoiceChannel(0, varName, cache);
-    case 11: return this.getVoiceChannel(1, varName, cache);
-    case 12: return this.getVoiceChannel(7, varName, cache);
-    case 13: return this.getVoiceChannel(2, varName, cache);
-    default: return this.getChannel(type, varName, cache);
   }
 };
 
@@ -1847,45 +1626,70 @@ Actions.storeValue = function (value, type, varName, cache) {
 };
 
 Actions.executeResults = function (result, data, cache) {
-  const type = parseInt(result ? data.iftrue : data.iffalse, 10);
-  switch (type) {
-    case 0: {
-      this.callNextAction(cache);
-      break;
-    }
-    case 1: {
-      this.endActions(cache);
-      break;
-    }
-    case 2: {
-      const val = parseInt(this.evalMessage(result ? data.iftrueVal : data.iffalseVal, cache), 10);
-      const index = Math.max(val - 1, 0);
-      if (cache.actions[index]) {
-        cache.index = index - 1;
+  if (result) {
+    const type = parseInt(data.iftrue, 10);
+    switch (type) {
+      case 0: {
         this.callNextAction(cache);
+        break;
       }
-      break;
+      case 2: {
+        const val = parseInt(this.evalMessage(data.iftrueVal, cache), 10);
+        const index = Math.max(val - 1, 0);
+        if (cache.actions[index]) {
+          cache.index = index - 1;
+          this.callNextAction(cache);
+        }
+        break;
+      }
+      case 3: {
+        const amount = parseInt(this.evalMessage(data.iftrueVal, cache), 10);
+        const index2 = cache.index + amount + 1;
+        if (cache.actions[index2]) {
+          cache.index = index2 - 1;
+          this.callNextAction(cache);
+        }
+        break;
+      }
+      case 99: {
+        this.executeSubActionsThenNextAction(data.iftrueActions, cache);
+        break;
+      }
+      default:
+        break;
     }
-    case 3: {
-      const amount = parseInt(this.evalMessage(result ? data.iftrueVal : data.iffalseVal, cache), 10);
-      const index2 = cache.index + amount + 1;
-      if (cache.actions[index2]) {
-        cache.index = index2 - 1;
+  } else {
+    const type = parseInt(data.iffalse, 10);
+    switch (type) {
+      case 0: {
         this.callNextAction(cache);
+        break;
       }
-      break;
+      case 2: {
+        const val = parseInt(this.evalMessage(data.iffalseVal, cache), 10);
+        const index = Math.max(val - 1, 0);
+        if (cache.actions[index]) {
+          cache.index = index - 1;
+          this.callNextAction(cache);
+        }
+        break;
+      }
+      case 3: {
+        const amount = parseInt(this.evalMessage(data.iffalseVal, cache), 10);
+        const index2 = cache.index + amount + 1;
+        if (cache.actions[index2]) {
+          cache.index = index2 - 1;
+          this.callNextAction(cache);
+        }
+        break;
+      }
+      case 99: {
+        this.executeSubActionsThenNextAction(data.iffalseActions, cache);
+        break;
+      }
+      default:
+        break;
     }
-    case 4: {
-      const anchorName = this.evalMessage(result ? data.iftrueVal : data.iffalseVal, cache);
-      cache.goToAnchor(anchorName);
-      break;
-    }
-    case 99: {
-      this.executeSubActionsThenNextAction(result ? data.iftrueActions : data.iffalseActions, cache);
-      break;
-    }
-    default:
-      break;
   }
 };
 
@@ -2150,7 +1954,6 @@ Events.generateData = function () {
     ["stickerUpdate", 1, 3, 4, true],
     ["threadUpdate", 1, 3, 4, true],
     ["threadMemberUpdate", 1, 3, 100, true],
-    [],
   ];
 };
 
@@ -2205,14 +2008,6 @@ Events.onInitialization = function (bot) {
     for (const server of bot.guilds.cache.values()) {
       Actions.invokeEvent(event, server, {});
     }
-  }
-};
-
-Events.onInitializationOnce = function (bot) {
-  const events = $evts["48"];
-  const server = bot.guilds.cache.first();
-  for (let i = 0; i < events.length; i++) {
-    Actions.invokeEvent(events[i], server, {});
   }
 };
 
@@ -2338,7 +2133,6 @@ Files.dataFiles = [
   "settings.json",
   "players.json",
   "servers.json",
-  "messages.json",
   "serverVars.json",
   "globalVars.json",
 ];
@@ -2367,30 +2161,22 @@ Files.readData = function (callback) {
   let cur = 0;
   for (let i = 0; i < max; i++) {
     const filePath = path.join(process.cwd(), "data", this.dataFiles[i]);
-    const filename = this.dataFiles[i].slice(0, -5);
-
-    const setData = (data) => {
+    if (!fs.existsSync(filePath)) continue;
+    fs.readFile(filePath, (_error, content) => {
+      const filename = this.dataFiles[i].slice(0, -5);
+      let data;
+      try {
+        if (typeof content !== "string" && content.toString) content = content.toString();
+        data = JSON.parse(this.decrypt(content));
+      } catch {
+        PrintError(MsgType.DATA_PARSING_ERROR, this.dataFiles[i]);
+        return;
+      }
       this.data[filename] = data;
       if (++cur === max) {
         callback();
       }
-    };
-
-    if (!fs.existsSync(filePath)) {
-      setData({});
-    } else {
-      fs.readFile(filePath, (_error, content) => {
-        let data;
-        try {
-          if (typeof content !== "string" && content.toString) content = content.toString();
-          data = JSON.parse(this.decrypt(content));
-        } catch {
-          PrintError(MsgType.DATA_PARSING_ERROR, this.dataFiles[i]);
-          return;
-        }
-        setData(data);
-      });
-    }
+    });
   }
 };
 
@@ -2715,16 +2501,8 @@ Audio.Subscription = class {
       if (leaveVoiceTimeout === "" || !isFinite(seconds)) return;
 
       require("node:timers")
-        .setTimeout(async () => {
-          let guild = null;
-          try {
-            guild = await Bot.bot.guilds.resolve(this.voiceConnection.joinConfig.guildId);
-          } catch(e) {
-            console.error(e);
-          }
-          if (guild) {
-            Audio.disconnectFromVoice(guild);
-          }
+        .setTimeout(() => {
+          Audio.disconnectFromVoice(this.voiceConnection.joinConfig.guildId);
         }, seconds * 1e3)
         .unref();
       return;
@@ -2798,14 +2576,10 @@ Audio.Track = class {
     });
   }
 
+  /** @param {String} url */
   static async from(url) {
-    let info = null;
-    try {
-      info = await Audio.ytdl.getInfo(url);
-    } catch(e) {
-      PrintError(MsgType.ERROR_GETTING_YT_INFO, e.stack.toString());
-    }
-    return new Audio.Track({ title: info?.videoDetails?.title ?? "", url });
+    const info = await Audio.ytdl.getInfo(url);
+    return new Audio.Track({ title: info.videoDetails.title, url });
   }
 };
 
@@ -2818,6 +2592,7 @@ Audio.BasicTrack = class {
     this.url = url;
   }
 
+  /** @param {String} url */
   createAudioResource() {
     return Audio.voice.createAudioResource(this.url, {
       inlineVolume: Audio.inlineVolume,
@@ -2828,53 +2603,34 @@ Audio.BasicTrack = class {
 
 Audio.subscriptions = new Map();
 
+/** @param {import('discord.js').VoiceChannel} voiceChannel */
 Audio.connectToVoice = function (voiceChannel) {
-  if (!Audio.voice || !Audio.rawYtdl || !Audio.ytdl) {
-    return PrintError(MsgType.MISSING_MUSIC_MODULES);
-  }
-
   Audio.inlineVolume ??= Files.data.settings.mutableVolume === "true";
-
-  const subscription = new this.Subscription(
-    this.voice.joinVoiceChannel({
-      adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-      channelId: voiceChannel.id,
-      guildId: voiceChannel.guildId,
-      selfDeaf: Files.data.settings.autoDeafen === "true",
-    }),
-  );
 
   this.subscriptions.set(
     voiceChannel.guildId,
-    subscription,
+    new this.Subscription(
+      this.voice.joinVoiceChannel({
+        adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+        channelId: voiceChannel.id,
+        guildId: voiceChannel.guildId,
+        setDeaf: Files.data.settings.autoDeafen ? Files.data.settings.autoDeafen === "true" : true,
+      }),
+    ),
   );
-
-  return subscription;
 };
 
-Audio.getSubscription = function (guild) {
-  const subscription = this.subscriptions.get(guild?.id);
-  if (!subscription) {
-    const voiceChannel = guild?.me?.voice?.channel;
-    if (voiceChannel) {
-      return this.connectToVoice(voiceChannel);
-    }
-  }
-  return subscription;
-};
-
-Audio.disconnectFromVoice = function (guild) {
-  if (!guild) return;
-  const subscription = this.getSubscription(guild);
+/** @param {import('discord.js').Snowflake} guildId */
+Audio.disconnectFromVoice = function (guildId) {
+  const subscription = this.subscriptions.get(guildId);
   if (!subscription) return;
   subscription.voiceConnection.destroy();
-  this.subscriptions.delete(guild?.id);
+  this.subscriptions.delete(guildId);
 };
 
-Audio.setVolume = function (volume, guild) {
-  if (!this.inlineVolume) return PrintError(MsgType.MUTABLE_VOLUME_DISABLED);
-  if (!guild) return;
-  const subscription = this.getSubscription(guild);
+Audio.setVolume = function (volume, guildId) {
+  if (!this.inlineVolume) return console.error("Tried setting volume but 'Mutable Volume' is disabled");
+  const subscription = this.subscriptions.get(guildId);
   if (!subscription) return;
   subscription.volume = volume;
   if (subscription.audioPlayer.state.status === this.voice.AudioPlayerStatus.Playing) {
@@ -2882,56 +2638,29 @@ Audio.setVolume = function (volume, guild) {
   }
 };
 
-Audio.addAudio = async function (info, guild, isQueue) {
-  if (!guild) return;
-  if (isQueue) {
-    Audio.addToQueue(info, guild);
-  } else {
-    Audio.playImmediately(info, guild);
-  }
+Audio.addToQueue = async function ([type, options, url], cache) {
+  if (!cache.server) return;
+  const id = cache.server.id;
+  const subscription = this.subscriptions.get(id);
+  if (!subscription) return;
+  if (typeof options.volume !== "undefined") this.setVolume(options.volume, id);
+  if (typeof options.bitrate !== "undefined") subscription.bitrate = options.bitrate;
+  subscription.enqueue(await this.getTrack(url, type));
 };
 
-Audio.addToQueue = async function ([type, options, url], guild) {
-  if (!guild) return;
-  const id = guild.id;
-  const subscription = this.getSubscription(guild);
+Audio.playItem = async function ([type, options, url], guildId) {
+  const subscription = this.subscriptions.get(guildId);
   if (!subscription) return;
-  if (typeof options.volume !== "undefined") this.setVolume(options.volume, guild);
+  if (typeof options.volume !== "undefined") this.setVolume(options.volume, id);
   if (typeof options.bitrate !== "undefined") subscription.bitrate = options.bitrate;
-  let track = null;
-  try {
-    track = await this.getTrack(url, type);
-  } catch(e) {
-    PrintError(MsgType.ERROR_CREATING_AUDIO, e.stack.toString());
-  }
-  if (track !== null) {
-    subscription.enqueue(track);
-  }
-};
-
-Audio.playImmediately = async function ([type, options, url], guild) {
-  if (!guild) return;
-  const subscription = this.getSubscription(guild);
-  if (!subscription) return;
-  if (typeof options.volume !== "undefined") this.setVolume(options.volume, guild);
-  if (typeof options.bitrate !== "undefined") subscription.bitrate = options.bitrate;
-  let track = null;
-  try {
-    track = await this.getTrack(url, type);
-  } catch(e) {
-    PrintError(MsgType.ERROR_CREATING_AUDIO, e.stack.toString());
-  }
-  if (track !== null) {
-    subscription.enqueue(track, true);
-  }
+  subscription.enqueue(await this.getTrack(url, type), true);
   subscription.audioPlayer.stop(true);
 };
 
 Audio.clearQueue = function (cache) {
   if (!cache.server) return;
-  const subscription = this.getSubscription(cache.server);
-  if (!subscription) return;
-  subscription.queue = [];
+  const id = cache.server.id;
+  if (this.subscriptions.has(id)) this.subscriptions.get(id).queue = [];
 };
 
 Audio.getTrack = function (url, type) {
@@ -2963,25 +2692,46 @@ Reflect.defineProperty(DiscordJS.GuildMember.prototype, "unban", {
 
 Reflect.defineProperty(DiscordJS.GuildMember.prototype, "data", {
   value(name, defaultValue) {
-    return DiscordJS.User.prototype.data.apply(this, arguments);
+    const id = this.id;
+    const data = Files.data.players;
+    if (data[id] === undefined) {
+      if (defaultValue === undefined) {
+        return null;
+      } else {
+        data[id] = {};
+      }
+    }
+    if (data[id][name] === undefined && defaultValue !== undefined) {
+      data[id][name] = defaultValue;
+    }
+    return data[id][name];
   },
 });
 
 Reflect.defineProperty(DiscordJS.GuildMember.prototype, "setData", {
   value(name, value) {
-    return DiscordJS.User.prototype.setData.apply(this, arguments);
+    const id = this.id;
+    const data = Files.data.players;
+    if (data[id] === undefined) {
+      data[id] = {};
+    }
+    data[id][name] = value;
+    Files.saveData("players");
   },
 });
 
 Reflect.defineProperty(DiscordJS.GuildMember.prototype, "addData", {
   value(name, value) {
-    return DiscordJS.User.prototype.addData.apply(this, arguments);
-  },
-});
-
-Reflect.defineProperty(DiscordJS.GuildMember.prototype, "clearData", {
-  value(name) {
-    return DiscordJS.User.prototype.clearData.apply(this, arguments);
+    const id = this.id;
+    const data = Files.data.players;
+    if (data[id] === undefined) {
+      data[id] = {};
+    }
+    if (data[id][name] === undefined) {
+      this.setData(name, value);
+    } else {
+      this.setData(name, this.data(name) + value);
+    }
   },
 });
 
@@ -3040,24 +2790,6 @@ Reflect.defineProperty(DiscordJS.User.prototype, "addData", {
   },
 });
 
-Reflect.defineProperty(DiscordJS.User.prototype, "clearData", {
-  value(name) {
-    const id = this.id;
-    const data = Files.data.players;
-    if (data[id] !== undefined) {
-      if (typeof name === "string") {
-        if (data[id][name] !== undefined) {
-          delete data[id][name];
-          Files.saveData("players");
-        }
-      } else {
-        delete data[id];
-        Files.saveData("players");
-      }
-    }
-  },
-});
-
 Reflect.defineProperty(DiscordJS.User.prototype, "convertToString", {
   value() {
     return `usr-${this.id}`;
@@ -3075,7 +2807,8 @@ Reflect.defineProperty(DiscordJS.Guild.prototype, "getDefaultChannel", {
       [...this.channels.cache.values()].forEach((c) => {
         if (
           c.permissionsFor(DBM.Bot.bot.user)?.has(DiscordJS.Permissions.FLAGS.SEND_MESSAGES) &&
-          (c.type === "GUILD_TEXT" || c.type === "GUILD_NEWS")
+          c.type === "GUILD_TEXT" &&
+          c.type === "GUILD_NEWS"
         ) {
           if (!channel || channel.position > c.position) {
             channel = c;
@@ -3151,24 +2884,6 @@ Reflect.defineProperty(DiscordJS.Guild.prototype, "addData", {
   },
 });
 
-Reflect.defineProperty(DiscordJS.Guild.prototype, "clearData", {
-  value(name) {
-    const id = this.id;
-    const data = Files.data.servers;
-    if (data[id] !== undefined) {
-      if (typeof name === "string") {
-        if (data[id][name] !== undefined) {
-          delete data[id][name];
-          Files.saveData("servers");
-        }
-      } else {
-        delete data[id];
-        Files.saveData("servers");
-      }
-    }
-  },
-});
-
 Reflect.defineProperty(DiscordJS.Guild.prototype, "convertToString", {
   value() {
     return `s-${this.id}`;
@@ -3179,69 +2894,6 @@ Reflect.defineProperty(DiscordJS.Guild.prototype, "convertToString", {
 // Message
 //---------------------------------------------------------------------
 
-Reflect.defineProperty(DiscordJS.Message.prototype, "data", {
-  value(name, defaultValue) {
-    const id = this.id;
-    const data = Files.data.messages;
-    if (data[id] === undefined) {
-      if (defaultValue === undefined) {
-        return null;
-      } else {
-        data[id] = {};
-      }
-    }
-    if (data[id][name] === undefined && defaultValue !== undefined) {
-      data[id][name] = defaultValue;
-    }
-    return data[id][name];
-  },
-});
-
-Reflect.defineProperty(DiscordJS.Message.prototype, "setData", {
-  value(name, value) {
-    const id = this.id;
-    const data = Files.data.messages;
-    if (data[id] === undefined) {
-      data[id] = {};
-    }
-    data[id][name] = value;
-    Files.saveData("messages");
-  },
-});
-
-Reflect.defineProperty(DiscordJS.Message.prototype, "addData", {
-  value(name, value) {
-    const id = this.id;
-    const data = Files.data.messages;
-    if (data[id] === undefined) {
-      data[id] = {};
-    }
-    if (data[id][name] === undefined) {
-      this.setData(name, value);
-    } else {
-      this.setData(name, this.data(name) + value);
-    }
-  },
-});
-
-Reflect.defineProperty(DiscordJS.Message.prototype, "clearData", {
-  value(name) {
-    const id = this.id;
-    const data = Files.data.messages;
-    if (data[id] !== undefined) {
-      if (typeof name === "string") {
-        if (data[id][name] !== undefined) {
-          delete data[id][name];
-          Files.saveData("messages");
-        }
-      } else {
-        delete data[id];
-        Files.saveData("messages");
-      }
-    }
-  },
-});
-
 Reflect.defineProperty(DiscordJS.Message.prototype, "convertToString", {
   value() {
     return `msg-${this.id}_c-${this.channel.id}`;
@@ -3251,12 +2903,6 @@ Reflect.defineProperty(DiscordJS.Message.prototype, "convertToString", {
 //---------------------------------------------------------------------
 // TextChannel
 //---------------------------------------------------------------------
-
-Reflect.defineProperty(DiscordJS.TextChannel.prototype, "startThread", {
-  value(options) {
-    return this.threads.create(options);
-  },
-});
 
 Reflect.defineProperty(DiscordJS.TextChannel.prototype, "convertToString", {
   value() {
